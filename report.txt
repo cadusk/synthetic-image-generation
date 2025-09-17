@@ -1,0 +1,5 @@
+=== Mini Relatorio de Imagens ===
+total_images: 3
+api_success: 3
+api_failures: 0
+augmented_images: 3
