@@ -1,0 +1,25 @@
+{
+  "entity": "fire",
+  "total_images": 3,
+  "api_success": 9,
+  "api_failures": 0,
+  "augmented_images": 9,
+  "contexts": {
+    "road1.jpg": {
+      "1": "fire in the roadside grass",
+      "2": "a vehicle on the highway catches fire",
+      "3": "fire under the bridge structure"
+    },
+    "road2.jpg": {
+      "1": "a car ablaze in a traffic lane",
+      "2": "a small brush fire on the roadside embankment",
+      "3": "flames from discarded debris on the hard shoulder"
+    },
+    "road3.jpg": {
+      "1": "fire in the dense trees adjacent to the motorway",
+      "2": "a vehicle on the motorway is ablaze",
+      "3": "small fire on the grassy median strip"
+    }
+  },
+  "processing_time": "0h 2m 40s"
+}

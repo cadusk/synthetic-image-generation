@@ -1,0 +1,26 @@
+{
+  "entity": "dog",
+  "total_images": 3,
+  "api_success": 9,
+  "api_failures": 0,
+  "augmented_images": 2,
+  "discarded": 7,
+  "contexts": {
+    "road1.jpg": {
+      "1": "dog walking on the grassy bank next to the highway",
+      "2": "dog standing on the yellow-painted hard shoulder",
+      "3": "dog looking out from the window of a passing car"
+    },
+    "road2.jpg": {
+      "1": "dog walking along the hard shoulder of the motorway",
+      "2": "dog riding as a passenger inside one of the cars",
+      "3": "dog running loose across the traffic lanes"
+    },
+    "road3.jpg": {
+      "1": "dog on the grassy shoulder of the highway",
+      "2": "dog inside one of the vehicles on the road",
+      "3": "dog wandering in the dense trees beside the highway"
+    }
+  },
+  "processing_time": "0h 3m 2s"
+}
