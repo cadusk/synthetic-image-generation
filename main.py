@@ -19,18 +19,21 @@ load_dotenv()
 parser = argparse.ArgumentParser(description="Synthetic Image Generation with AI and Data Augmentation + Judge")
 parser.add_argument("-e", "--entity", type=str, help="Entity to add in the images", required=True)
 parser.add_argument("-c", "--context_limit", type=int, help="The limit for generate contexts", default=3)
-parser.add_argument("-i", "--input_folder", type=str, help="Input folder with images", default="input_images")
-parser.add_argument("-o", "--output_folder", type=str, help="Output folder for generated images", default="output_images")
-parser.add_argument("-d", "--discard_folder", type=str, help="Folder for discarded images", default="discarded_images")
+parser.add_argument("-i", "--input_folder", type=str, help="Input folder with images", default="./images/input")
+parser.add_argument("-o", "--output_folder", type=str, help="Output folder for generated images", default="./images/output")
+parser.add_argument("-d", "--discard_folder", type=str, help="Folder for discarded images", default="./images/discard")
+parser.add_argument("-m", "--mirror_image", action='store_true', help="Generation additonal mirrored output image")
 args = parser.parse_args()
 
 API_KEY = os.getenv("API_KEY")
+
 ENTITY = args.entity
 CONTEXT_LIMIT = args.context_limit
 INPUT_FOLDER = args.input_folder
 OUTPUT_FOLDER = args.output_folder
 DISCARD_FOLDER = os.path.join(args.discard_folder, ENTITY)
 ENTITY_OUTPUT_FOLDER = os.path.join(OUTPUT_FOLDER, ENTITY)
+MIRROR_IMAGE = args.mirror_image
 
 os.makedirs(ENTITY_OUTPUT_FOLDER, exist_ok=True)
 
@@ -67,21 +70,21 @@ def analyze_context(image_path, entity, context_number):
     mime_type = "image/jpeg" if ext in [".jpg", ".jpeg"] else "image/png"
     base64_image = base64.b64encode(image_data).decode("utf-8")
 
-    prompt_text = (
-        f"Analyze this image and return possible scenarios where the entity '{entity}' could be placed. "
-        f"The output must be ONLY a valid JSON object with keys as integers and values as short English descriptions. "
-        f"Example: {{\"1\": \"{entity} standing in the roadside\", \"2\": \"{entity} standing in the middle of the road\"}}. "
-        f"Limit yourself to a maximum of {context_number} values. Only valid JSON."
-    )
+    prompt = f"""
+        Analyze this image and return possible scenarios where the entity '{entity}' could be placed.
+        The output must be ONLY a valid JSON object with keys as integers and values as short English descriptions.
+        Example: {{"1": "{entity} standing in the roadside", "2": "{entity} standing in the middle of the road"}}.
+        Limit yourself to a maximum of {context_number} values. Only valid JSON.
+    """
 
-    prompt = [
-        {"text": prompt_text},
+    contents = [
+        {"text": prompt},
         {"inlineData": {"mimeType": mime_type, "data": base64_image}}
     ]
 
     response = ai.models.generate_content(
         model="gemini-2.5-flash",
-        contents=prompt
+        contents=contents
     )
 
     text_out = response.candidates[0].content.parts[0].text
@@ -96,12 +99,12 @@ def generate_with_entity(image_path, entity, context_option=None, max_retries=3)
     base64_image = base64.b64encode(image_data).decode("utf-8")
 
     if context_option:
-        prompt_text = f"Add {entity} in this context: {context_option}."
+        prompt = f"Add {entity} in this context: {context_option}."
     else:
-        prompt_text = f"Add {entity} into the scene."
+        prompt = f"Add {entity} into the scene."
 
-    prompt = [
-        {"text": prompt_text},
+    contents = [
+        {"text": prompt},
         {"inlineData": {"mimeType": mime_type, "data": base64_image}}
     ]
 
@@ -109,7 +112,7 @@ def generate_with_entity(image_path, entity, context_option=None, max_retries=3)
         try:
             response = ai.models.generate_content(
                 model="gemini-2.5-flash-image-preview",
-                contents=prompt
+                contents=contents
             )
             parts = response.candidates[0].content.parts
             for part in parts:
@@ -129,24 +132,24 @@ def judge_image(pil_image, entity):
     pil_image.save(buffered, format="PNG")
     base64_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-    prompt_text = (
-        f"You are a strict evaluator of AI-generated content. "
-        f"Look ONLY at the entity '{entity}' in the image. "
-        f"If the entity looks artificial, fake, poorly blended, distorted, or clearly AI-generated, "
-        f"respond with this exact JSON: {{\"status\": false}}. "
-        f"If the entity looks natural enough in the context of the scene (even if not perfect), "
-        f"respond with this exact JSON: {{\"status\": true}}. "
-        f"Do not include explanations, only the JSON."
-    )
+    prompt = f"""
+        You are a strict evaluator of AI-generated content.
+        Look ONLY at the entity '{entity}' in the image.
+        If the entity looks artificial, fake, poorly blended, distorted, or clearly AI-generated,
+        respond with this exact JSON: {{"status": false}}.
+        If the entity looks natural enough in the context of the scene (even if not perfect),
+        respond with this exact JSON: {{"status": true}}.
+        Do not include explanations, only the JSON.
+    """
 
-    prompt = [
-        {"text": prompt_text},
+    contents = [
+        {"text": prompt},
         {"inlineData": {"mimeType": "image/png", "data": base64_image}}
     ]
 
     response = ai.models.generate_content(
         model="gemini-2.5-flash",
-        contents=prompt
+        contents=contents
     )
 
     text_out = response.candidates[0].content.parts[0].text.strip()
@@ -201,6 +204,9 @@ for img_file in tqdm(os.listdir(INPUT_FOLDER)):
             output_filename = f"{base_name}_ctx{idx}{ext}"
             output_path = os.path.join(ENTITY_OUTPUT_FOLDER, output_filename)
             output_image.save(output_path)
+
+            if not MIRROR_IMAGE:
+                continue
 
             aug_image = augment_image(output_image)
             aug_filename = f"{base_name}_ctx{idx}_aug{ext}"
