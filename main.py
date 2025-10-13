@@ -1,11 +1,7 @@
 import os
 import base64
-import argparse
 import json
-import shutil
 import time
-import re
-from dotenv import load_dotenv
 from google import genai
 from google.genai.errors import ServerError
 from PIL import Image
@@ -14,54 +10,34 @@ from tqdm import tqdm
 import albumentations as A
 import numpy as np
 
+from utils import safe_json_extract
+from utils import ensure_folders
+
+from dotenv import load_dotenv
 load_dotenv()
 
-parser = argparse.ArgumentParser(description="Synthetic Image Generation with AI and Data Augmentation + Judge")
-parser.add_argument("-e", "--entity", type=str, help="Entity to add in the images", required=True)
-parser.add_argument("-c", "--context_limit", type=int, help="The limit for generate contexts", default=3)
-parser.add_argument("-i", "--input_folder", type=str, help="Input folder with images", default="./images/input")
-parser.add_argument("-o", "--output_folder", type=str, help="Output folder for generated images", default="./images/output")
-parser.add_argument("-d", "--discard_folder", type=str, help="Folder for discarded images", default="./images/discard")
-parser.add_argument("-m", "--mirror_image", action='store_true', help="Generation additonal mirrored output image")
-args = parser.parse_args()
-
-API_KEY = os.getenv("API_KEY")
+from arguments import parse_arguments
+args = parse_arguments()
 
 ENTITY = args.entity
 CONTEXT_LIMIT = args.context_limit
 INPUT_FOLDER = args.input_folder
-OUTPUT_FOLDER = args.output_folder
 DISCARD_FOLDER = os.path.join(args.discard_folder, ENTITY)
-ENTITY_OUTPUT_FOLDER = os.path.join(OUTPUT_FOLDER, ENTITY)
-MIRROR_IMAGE = args.mirror_image
+OUTPUT_FOLDER = os.path.join(args.output_folder, ENTITY)
+AUGMENT_IMAGE = args.augment_image
 
-os.makedirs(ENTITY_OUTPUT_FOLDER, exist_ok=True)
 
-if os.path.exists(DISCARD_FOLDER):
-    shutil.rmtree(DISCARD_FOLDER)
-os.makedirs(DISCARD_FOLDER, exist_ok=True)
+API_KEY = os.getenv("API_KEY")
+ai = genai.Client(api_key=API_KEY)
+
 
 # ---------------- Data Augmentation ----------------
 transform = A.Compose([
     A.HorizontalFlip(p=1)
 ])
 
-# ---------------- GenAI Client ----------------
-ai = genai.Client(api_key=API_KEY)
 
 # ---------------- Functions ----------------
-def safe_json_extract(text, entity):
-    try:
-        return json.loads(text)
-    except Exception:
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group(0))
-            except Exception:
-                pass
-        return {"1": f"{entity} in the scene (fallback)"}
-
 def analyze_context(image_path, entity, context_number):
     with open(image_path, "rb") as f:
         image_data = f.read()
@@ -90,6 +66,7 @@ def analyze_context(image_path, entity, context_number):
     text_out = response.candidates[0].content.parts[0].text
     return safe_json_extract(text_out, entity)
 
+
 def generate_with_entity(image_path, entity, context_option=None, max_retries=3):
     with open(image_path, "rb") as f:
         image_data = f.read()
@@ -98,10 +75,11 @@ def generate_with_entity(image_path, entity, context_option=None, max_retries=3)
     mime_type = "image/jpeg" if ext in [".jpg", ".jpeg"] else "image/png"
     base64_image = base64.b64encode(image_data).decode("utf-8")
 
-    if context_option:
-        prompt = f"Add {entity} in this context: {context_option}."
-    else:
-        prompt = f"Add {entity} into the scene."
+    prompt = f"""
+        Add {entity} in this context: {context_option}.
+        Ensure that the entity's size is proportional to the scene and other objects around it.
+        DO NOT make adjustments to other original objects to accommodate the new entity.
+    """
 
     contents = [
         {"text": prompt},
@@ -127,6 +105,7 @@ def generate_with_entity(image_path, entity, context_option=None, max_retries=3)
                 return None
     return None
 
+
 def judge_image(pil_image, entity):
     buffered = BytesIO()
     pil_image.save(buffered, format="PNG")
@@ -135,7 +114,7 @@ def judge_image(pil_image, entity):
     prompt = f"""
         You are a strict evaluator of AI-generated content.
         Look ONLY at the entity '{entity}' in the image.
-        If the entity looks artificial, fake, poorly blended, distorted, or clearly AI-generated,
+        If the entity looks artificial, fake, poorly blended, distorted, it's size is not proportial compared to other objects or clearly AI-generated,
         respond with this exact JSON: {{"status": false}}.
         If the entity looks natural enough in the context of the scene (even if not perfect),
         respond with this exact JSON: {{"status": true}}.
@@ -158,31 +137,40 @@ def judge_image(pil_image, entity):
     except Exception:
         return {"status": False}
 
-def augment_image(pil_image):
-    img = np.array(pil_image)
-    augmented = transform(image=img)["image"]
-    return Image.fromarray(augmented)
+
 
 # ---------------- Main ----------------
-start_time = time.time()
+def main():
+    ensure_folders(OUTPUT_FOLDER, DISCARD_FOLDER)
 
-report = {
-    "entity": ENTITY,
-    "total_images": 0,
-    "api_success": 0,
-    "api_failures": 0,
-    "augmented_images": 0,
-    "discarded": 0,
-    "contexts": {}
-}
+    report = {
+        "entity": ENTITY,
+        "total_images": 0,
+        "api_success": 0,
+        "api_failures": 0,
+        "augmented_images": 0,
+        "discarded": 0,
+        "contexts": {}
+    }
 
-for img_file in tqdm(os.listdir(INPUT_FOLDER)):
-    if img_file.lower().endswith((".png", ".jpg", ".jpeg")):
+    start_time = time.time()
+    for filename in tqdm(os.listdir(INPUT_FOLDER)):
+        
+        input_path = os.path.join(INPUT_FOLDER, filename)
+
+        if not os.path.isfile(input_path):
+            print("Discarding unsupported dir content: ", input_path)
+            continue
+
+
+        if not input_path.lower().endswith((".png", ".jpg", ".jpeg")):
+            print("Discarding unsupported file: ", input_path)
+            continue
+
         report["total_images"] += 1
-        input_path = os.path.join(INPUT_FOLDER, img_file)
 
         contexts = analyze_context(input_path, ENTITY, CONTEXT_LIMIT)
-        report["contexts"][img_file] = contexts
+        report["contexts"][filename] = contexts
 
         for idx, context_option in contexts.items():
             output_image = generate_with_entity(input_path, ENTITY, context_option)
@@ -194,34 +182,56 @@ for img_file in tqdm(os.listdir(INPUT_FOLDER)):
 
             judge_result = judge_image(output_image, ENTITY)
             if not judge_result.get("status", False):
-                discard_name = f"{os.path.splitext(img_file)[0]}_ctx{idx}.png"
+                # Judge doesn't like it, send it to discard pile
+                discard_name = f"{os.path.splitext(filename)[0]}_ctx{idx}.png"
                 discard_path = os.path.join(DISCARD_FOLDER, discard_name)
                 output_image.save(discard_path)
                 report["discarded"] += 1
                 continue
 
-            base_name, ext = os.path.splitext(img_file)
+            # send it to good pile
+            base_name, ext = os.path.splitext(filename)
             output_filename = f"{base_name}_ctx{idx}{ext}"
-            output_path = os.path.join(ENTITY_OUTPUT_FOLDER, output_filename)
+            output_path = os.path.join(OUTPUT_FOLDER, output_filename)
             output_image.save(output_path)
 
-            if not MIRROR_IMAGE:
+
+            if not AUGMENT_IMAGE:
                 continue
 
+            # Let's augment this image applying some transformations
             aug_image = augment_image(output_image)
             aug_filename = f"{base_name}_ctx{idx}_aug{ext}"
-            aug_path = os.path.join(ENTITY_OUTPUT_FOLDER, aug_filename)
+            aug_path = os.path.join(OUTPUT_FOLDER, aug_filename)
             aug_image.save(aug_path)
             report["augmented_images"] += 1
 
-elapsed = time.time() - start_time
-h, rem = divmod(elapsed, 3600)
-m, s = divmod(rem, 60)
-report["processing_time"] = f"{int(h)}h {int(m)}m {int(s)}s"
+    elapsed_time = time.time() - start_time
+    report["processing_time"] = format_elapsed_time(elapsed_time)
+    save_report(report)
 
-report_path = os.path.join(ENTITY_OUTPUT_FOLDER, "report.json")
-with open(report_path, "w", encoding="utf-8") as f:
-    json.dump(report, f, indent=2, ensure_ascii=False)
 
-print(f"Report saved in {report_path}")
-print(f"Total processing time: {report['processing_time']}")
+
+def format_elapsed_time(elapsed_time):
+    h, rem = divmod(elapsed_time, 3600)
+    m, s = divmod(rem, 60)
+    return f"{int(h)}h {int(m)}m {int(s)}s"
+
+
+def save_report(report):
+    report_path = os.path.join(OUTPUT_FOLDER, "report.json")
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+
+    print(f"Report saved in {report_path}")
+
+
+def augment_image(pil_image):
+    img = np.array(pil_image)
+    augmented = transform(image=img)["image"]
+    return Image.fromarray(augmented)
+
+
+
+if __name__ == '__main__':
+    main()
