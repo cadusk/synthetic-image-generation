@@ -1,0 +1,23 @@
+{
+  "entity": "ladybug",
+  "total_images": 3,
+  "api_success": 6,
+  "api_failures": 0,
+  "augmented_images": 3,
+  "discarded": 3,
+  "contexts": {
+    "road1.jpg": {
+      "1": "ladybug crawling on the grassy verge beside the highway",
+      "2": "ladybug resting on a fence post near the roadside"
+    },
+    "road2.jpg": {
+      "1": "ladybug resting on a leaf in the roadside trees",
+      "2": "ladybug crawling on a lamp post beside the highway"
+    },
+    "road3.jpg": {
+      "1": "ladybug resting on a leaf in the lush greenery beside the highway",
+      "2": "ladybug crawling on the wet metal guardrail next to the roadside bushes"
+    }
+  },
+  "processing_time": "0h 1m 23s"
+}
